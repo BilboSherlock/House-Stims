@@ -1,0 +1,6 @@
+{
+  "name": "Stim Soundboard",
+  "description": "A fast, streamlined soundboard for house stims and audio clips with desktop and mobile support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
