@@ -73,5 +73,13 @@ export const SOUNDBOARD_CONFIG: SoundboardConfig = {
       category: 'House Stims',
       color: 'black',
     },
+    {
+      id: 'yt-one-small-exception',
+      title: 'One Small Exception',
+      description: 'House stim clip',
+      youtubeUrl: 'https://youtu.be/17GI4l3_35Q?list=PLdUrbQOZtGn0',
+      category: 'House Stims',
+      color: 'black',
+    },
   ],
 };
