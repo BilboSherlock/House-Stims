@@ -1,11 +1,15 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, Suspense, lazy } from 'react';
 import { SOUNDBOARD_CONFIG } from './soundboardConfig';
 import { audioEngine } from './audioEngine';
 import { SoundItem } from './types';
 import { SoundCard } from './components/SoundCard';
 import { HeaderControls } from './components/HeaderControls';
 import { CategoryBanner } from './components/CategoryBanner';
-import { LinkCodeGeneratorModal } from './components/LinkCodeGeneratorModal';
+
+// Lazy load heavy code generator modal only when opened
+const LinkCodeGeneratorModal = lazy(() =>
+  import('./components/LinkCodeGeneratorModal').then((m) => ({ default: m.LinkCodeGeneratorModal }))
+);
 
 interface CategoryGroup {
   name: string;
@@ -14,8 +18,31 @@ interface CategoryGroup {
 
 const CATEGORY_ORDER = ['House Stims', 'X-Men', 'Invincible', 'Unc'];
 
+// Statically group sounds once outside component lifecycle
+const GROUPED_CATEGORIES: CategoryGroup[] = (() => {
+  const groups: Record<string, SoundItem[]> = {};
+  for (const sound of SOUNDBOARD_CONFIG.sounds) {
+    const cat = sound.category?.trim() || 'House Stims';
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(sound);
+  }
+
+  const existingCategories = Object.keys(groups);
+  const orderedKeys = [
+    ...CATEGORY_ORDER.filter((c) => existingCategories.includes(c)),
+    ...existingCategories.filter((c) => !CATEGORY_ORDER.includes(c)),
+  ];
+
+  return orderedKeys.map((key) => ({
+    name: key,
+    sounds: groups[key],
+  }));
+})();
+
 export default function App() {
-  const [activeSoundIds, setActiveSoundIds] = useState<string[]>([]);
+  const [activeSoundSet, setActiveSoundSet] = useState<ReadonlySet<string>>(
+    () => new Set(audioEngine.getActiveIds())
+  );
   const [volume, setVolume] = useState<number>(() => audioEngine.getVolume());
   const [isMuted, setIsMuted] = useState<boolean>(() => audioEngine.getIsMuted());
   const [isCodeModalOpen, setIsCodeModalOpen] = useState<boolean>(false);
@@ -23,28 +50,25 @@ export default function App() {
 
   // Subscribe to audio engine active playback states
   useEffect(() => {
-    const unsubscribe = audioEngine.subscribe((ids) => {
-      setActiveSoundIds(ids);
+    return audioEngine.subscribe((activeIds) => {
+      setActiveSoundSet(new Set(activeIds));
     });
-    return unsubscribe;
   }, []);
 
-  // Handle playing a sound
+  // Audio playback controls
   const handlePlaySound = useCallback((sound: SoundItem, containerId?: string) => {
     audioEngine.play(sound, SOUNDBOARD_CONFIG.allowPolyphony, containerId);
   }, []);
 
-  // Handle stopping a sound
   const handleStopSound = useCallback((soundId: string) => {
     audioEngine.stopSound(soundId);
   }, []);
 
-  // Handle stopping all sounds
   const handleStopAll = useCallback(() => {
     audioEngine.stopAll();
   }, []);
 
-  // Handle Volume
+  // Volume & Mute Controls
   const handleVolumeChange = useCallback((vol: number) => {
     setVolume(vol);
     setIsMuted(false);
@@ -52,43 +76,19 @@ export default function App() {
     audioEngine.setVolume(vol);
   }, []);
 
-  // Handle Mute Toggle
   const handleMuteToggle = useCallback(() => {
-    const nextMuted = !isMuted;
-    setIsMuted(nextMuted);
-    audioEngine.setMuted(nextMuted);
-  }, [isMuted]);
-
-  // Group sounds by their category with preferred ordering
-  const groupedCategories: CategoryGroup[] = useMemo(() => {
-    const groups: Record<string, SoundItem[]> = {};
-    for (const sound of SOUNDBOARD_CONFIG.sounds) {
-      const cat = (sound.category && sound.category.trim()) || 'House Stims';
-      if (!groups[cat]) {
-        groups[cat] = [];
-      }
-      groups[cat].push(sound);
-    }
-
-    const existingCategories = Object.keys(groups);
-    const orderedKeys = [
-      ...CATEGORY_ORDER.filter((c) => existingCategories.includes(c)),
-      ...existingCategories.filter((c) => !CATEGORY_ORDER.includes(c)),
-    ];
-
-    return orderedKeys.map((key) => ({
-      name: key,
-      sounds: groups[key],
-    }));
+    setIsMuted((prev) => {
+      const next = !prev;
+      audioEngine.setMuted(next);
+      return next;
+    });
   }, []);
 
   // Filter groups according to active category tab
   const displayedCategories = useMemo(() => {
-    if (selectedCategory === 'all') {
-      return groupedCategories;
-    }
-    return groupedCategories.filter((g) => g.name === selectedCategory);
-  }, [groupedCategories, selectedCategory]);
+    if (selectedCategory === 'all') return GROUPED_CATEGORIES;
+    return GROUPED_CATEGORIES.filter((g) => g.name === selectedCategory);
+  }, [selectedCategory]);
 
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col antialiased selection:bg-stone-700 selection:text-white">
@@ -96,7 +96,7 @@ export default function App() {
       <HeaderControls
         title={SOUNDBOARD_CONFIG.appTitle}
         subtitle={SOUNDBOARD_CONFIG.appSubtitle}
-        activeCount={activeSoundIds.length}
+        activeCount={activeSoundSet.size}
         onStopAll={handleStopAll}
         volume={volume}
         isMuted={isMuted}
@@ -108,7 +108,7 @@ export default function App() {
       {/* Main Container */}
       <main className="flex-1 max-w-5xl w-full mx-auto p-3.5 sm:p-6">
         {/* Category Navigation Tabs */}
-        {groupedCategories.length > 1 && (
+        {GROUPED_CATEGORIES.length > 1 && (
           <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-5 scrollbar-none">
             <button
               type="button"
@@ -121,7 +121,7 @@ export default function App() {
             >
               All ({SOUNDBOARD_CONFIG.sounds.length})
             </button>
-            {groupedCategories.map((cat) => (
+            {GROUPED_CATEGORIES.map((cat) => (
               <button
                 key={cat.name}
                 type="button"
@@ -141,7 +141,7 @@ export default function App() {
         {/* Categorized Sound Sections */}
         <div className="space-y-8">
           {displayedCategories.map((group) => {
-            const isAnyPlaying = group.sounds.some((s) => activeSoundIds.includes(s.id));
+            const isAnyPlaying = group.sounds.some((s) => activeSoundSet.has(s.id));
             return (
               <section
                 key={group.name}
@@ -157,18 +157,15 @@ export default function App() {
 
                 {/* Grid for this category */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-5">
-                  {group.sounds.map((sound) => {
-                    const isPlaying = activeSoundIds.includes(sound.id);
-                    return (
-                      <SoundCard
-                        key={sound.id}
-                        sound={sound}
-                        isPlaying={isPlaying}
-                        onPlay={handlePlaySound}
-                        onStop={handleStopSound}
-                      />
-                    );
-                  })}
+                  {group.sounds.map((sound) => (
+                    <SoundCard
+                      key={sound.id}
+                      sound={sound}
+                      isPlaying={activeSoundSet.has(sound.id)}
+                      onPlay={handlePlaySound}
+                      onStop={handleStopSound}
+                    />
+                  ))}
                 </div>
               </section>
             );
@@ -176,11 +173,15 @@ export default function App() {
         </div>
       </main>
 
-      {/* Simple Streamlined Link to Backend Code Generator Modal */}
-      <LinkCodeGeneratorModal
-        isOpen={isCodeModalOpen}
-        onClose={() => setIsCodeModalOpen(false)}
-      />
+      {/* Code Generator Modal rendered on-demand */}
+      {isCodeModalOpen && (
+        <Suspense fallback={null}>
+          <LinkCodeGeneratorModal
+            isOpen={isCodeModalOpen}
+            onClose={() => setIsCodeModalOpen(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

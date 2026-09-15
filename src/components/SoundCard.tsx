@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Play, Square, ExternalLink, Video, Volume2, VolumeX, Loader2, Music } from 'lucide-react';
 import { SoundItem } from '../types';
@@ -13,71 +13,70 @@ interface SoundCardProps {
   onStop?: (soundId: string) => void;
 }
 
-const COLOR_ACCENTS: Record<string, { border: string; activeRing: string; dot: string; buttonBg: string; activeBtn: string }> = {
+const COLOR_ACCENTS: Record<string, { border: string; activeRing: string; dot: string; buttonBg: string }> = {
   rose: {
     border: 'border-rose-900/50',
     activeRing: 'ring-2 ring-rose-500 border-rose-500 shadow-lg shadow-rose-950/50',
     dot: 'bg-rose-400',
     buttonBg: 'bg-rose-600 hover:bg-rose-500 text-white',
-    activeBtn: 'bg-rose-600 text-white',
   },
   amber: {
     border: 'border-amber-900/50',
     activeRing: 'ring-2 ring-amber-500 border-amber-500 shadow-lg shadow-amber-950/50',
     dot: 'bg-amber-400',
     buttonBg: 'bg-amber-500 hover:bg-amber-400 text-stone-950 font-semibold',
-    activeBtn: 'bg-amber-500 text-stone-950 font-semibold',
   },
   violet: {
     border: 'border-violet-900/50',
     activeRing: 'ring-2 ring-violet-500 border-violet-500 shadow-lg shadow-violet-950/50',
     dot: 'bg-violet-400',
     buttonBg: 'bg-violet-600 hover:bg-violet-500 text-white',
-    activeBtn: 'bg-violet-600 text-white',
   },
   cyan: {
     border: 'border-cyan-900/50',
     activeRing: 'ring-2 ring-cyan-500 border-cyan-500 shadow-lg shadow-cyan-950/50',
     dot: 'bg-cyan-400',
     buttonBg: 'bg-cyan-500 hover:bg-cyan-400 text-stone-950 font-semibold',
-    activeBtn: 'bg-cyan-500 text-stone-950 font-semibold',
   },
   emerald: {
     border: 'border-emerald-900/50',
     activeRing: 'ring-2 ring-emerald-500 border-emerald-500 shadow-lg shadow-emerald-950/50',
     dot: 'bg-emerald-400',
     buttonBg: 'bg-emerald-500 hover:bg-emerald-400 text-stone-950 font-semibold',
-    activeBtn: 'bg-emerald-500 text-stone-950 font-semibold',
   },
   orange: {
     border: 'border-orange-900/50',
     activeRing: 'ring-2 ring-orange-500 border-orange-500 shadow-lg shadow-orange-950/50',
     dot: 'bg-orange-400',
     buttonBg: 'bg-orange-600 hover:bg-orange-500 text-white',
-    activeBtn: 'bg-orange-600 text-white',
   },
   black: {
     border: 'border-stone-700',
     activeRing: 'ring-2 ring-stone-400 border-stone-400 shadow-lg shadow-black/60',
     dot: 'bg-stone-300',
     buttonBg: 'bg-stone-700 hover:bg-stone-600 text-stone-100 font-medium',
-    activeBtn: 'bg-stone-700 text-stone-100',
   },
   stone: {
     border: 'border-stone-700',
     activeRing: 'ring-2 ring-stone-400 border-stone-400 shadow-lg shadow-black/60',
     dot: 'bg-stone-300',
     buttonBg: 'bg-stone-700 hover:bg-stone-600 text-stone-100 font-medium',
-    activeBtn: 'bg-stone-700 text-stone-100',
   },
 };
 
-export const SoundCard: React.FC<SoundCardProps> = ({
-  sound,
-  isPlaying,
-  onPlay,
-  onStop,
-}) => {
+function resolveThumbnailUrl(sound: SoundItem, ytVideoId: string | null): string | null {
+  if (sound.thumbnailUrl) {
+    if (sound.thumbnailUrl.startsWith('/') && !sound.thumbnailUrl.startsWith('//')) {
+      const base = import.meta.env.BASE_URL || './';
+      const cleanBase = base === '/' ? '' : base.replace(/\/$/, '');
+      return `${cleanBase}${sound.thumbnailUrl}`;
+    }
+    return sound.thumbnailUrl;
+  }
+  return ytVideoId ? `https://img.youtube.com/vi/${ytVideoId}/hqdefault.jpg` : null;
+}
+
+const SoundCardComponent: React.FC<SoundCardProps> = ({ sound, isPlaying, onPlay, onStop }) => {
   const accent = COLOR_ACCENTS[sound.color || 'amber'] || COLOR_ACCENTS.amber;
   const containerId = `media-embed-${sound.id}`;
 
@@ -87,58 +86,47 @@ export const SoundCard: React.FC<SoundCardProps> = ({
   const isYouTube = !isTikTok && !!sound.youtubeUrl && sound.youtubeUrl.trim() !== '';
 
   const [imageError, setImageError] = useState(false);
-
-  // Track TikTok player engine state when active
   const [tiktokState, setTiktokState] = useState<TikTokState>(() => tiktokEngine.getState());
 
+  // Only subscribe to TikTok engine updates when TikTok is actively playing
   useEffect(() => {
-    if (!isTikTok) return;
-    const unsubscribe = tiktokEngine.subscribeState((state) => {
+    if (!isTikTok || !isPlaying) return;
+    return tiktokEngine.subscribeState((state) => {
       if (state.soundId === sound.id || state.soundId === null) {
         setTiktokState(state);
       }
     });
-    return unsubscribe;
-  }, [isTikTok, sound.id]);
+  }, [isTikTok, isPlaying, sound.id]);
 
-  // Extract identifiers
-  const ytVideoId = isYouTube ? extractYouTubeId(sound.youtubeUrl) : null;
-  const ttVideoId = isTikTok ? extractTikTokId(rawTikTok) : null;
+  const ytVideoId = useMemo(() => (isYouTube ? extractYouTubeId(sound.youtubeUrl) : null), [isYouTube, sound.youtubeUrl]);
+  const thumbnailUrl = useMemo(() => resolveThumbnailUrl(sound, ytVideoId), [sound, ytVideoId]);
 
-  // Resolve thumbnail
-  let thumbnailUrl = sound.thumbnailUrl || null;
-  if (thumbnailUrl && thumbnailUrl.startsWith('/') && !thumbnailUrl.startsWith('//')) {
-    const base = import.meta.env.BASE_URL || './';
-    const cleanBase = base === '/' ? '' : base.replace(/\/$/, '');
-    thumbnailUrl = `${cleanBase}${thumbnailUrl}`;
-  } else if (!thumbnailUrl && ytVideoId) {
-    thumbnailUrl = `https://img.youtube.com/vi/${ytVideoId}/hqdefault.jpg`;
-  }
-
-  // Determine external URL & tooltip
-  const externalUrl = isTikTok ? (sound.tiktokUrl || sound.youtubeUrl) : sound.youtubeUrl;
+  const externalUrl = isTikTok ? sound.tiktokUrl || sound.youtubeUrl : sound.youtubeUrl;
   const externalLabel = isTikTok ? 'Open on TikTok' : 'Open on YouTube';
 
   const isCurrentTikTokActive = isTikTok && isPlaying && tiktokState.soundId === sound.id;
   const isTikTokMuted = isCurrentTikTokActive && tiktokState.isMuted;
   const isTikTokReady = isCurrentTikTokActive && tiktokState.isReady;
 
-  const handleToggle = (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    if (isPlaying) {
-      if (onStop) onStop(sound.id);
-    } else {
-      onPlay(sound, containerId);
-    }
-  };
+  const handleToggle = useCallback(
+    (e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      if (isPlaying) {
+        onStop?.(sound.id);
+      } else {
+        onPlay(sound, containerId);
+      }
+    },
+    [isPlaying, onStop, onPlay, sound, containerId]
+  );
 
-  const handleUnmute = (e?: React.MouseEvent) => {
+  const handleUnmute = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
     tiktokEngine.unmute();
     tiktokEngine.setVolume(100);
-  };
+  }, []);
 
-  const handleMuteToggle = (e?: React.MouseEvent) => {
+  const handleMuteToggle = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (tiktokState.isMuted) {
       tiktokEngine.unmute();
@@ -146,26 +134,21 @@ export const SoundCard: React.FC<SoundCardProps> = ({
     } else {
       tiktokEngine.mute();
     }
-  };
+  }, [tiktokState.isMuted]);
 
   return (
     <div
       id={`sound-card-${sound.id}`}
+      style={{ contentVisibility: 'auto', containIntrinsicSize: '320px 240px' }}
       className={`relative w-full rounded-2xl bg-[#23201d] border overflow-hidden transition-all duration-200 flex flex-col group shadow-md shadow-black/40 ${
         isPlaying ? accent.activeRing : `${accent.border} hover:border-stone-600 hover:bg-[#282421]`
       }`}
     >
-      {/* Video & Thumbnail Player Box (16:9 ratio, responsive across mobile & desktop) */}
+      {/* Video & Thumbnail Player Box */}
       <div className="relative w-full aspect-video bg-[#2d2926] overflow-hidden select-none border-b border-stone-800/80">
-        {/* Ambient Blurred Background (smooth backdrop for portrait TikToks & YouTube) */}
-        {thumbnailUrl && !imageError && (
-          <div
-            className="absolute inset-0 bg-cover bg-center filter blur-xl opacity-25 scale-125 pointer-events-none transition-opacity duration-500"
-            style={{ backgroundImage: `url(${thumbnailUrl})` }}
-          />
-        )}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-stone-800/40 via-[#23201d] to-[#1c1917] pointer-events-none" />
 
-        {/* Active Embed Container (YouTube or TikTok) */}
+        {/* Active Embed Container */}
         <div
           id={containerId}
           className={`w-full h-full absolute inset-0 z-10 transition-opacity duration-300 ${
@@ -184,9 +167,7 @@ export const SoundCard: React.FC<SoundCardProps> = ({
               className="w-full h-full absolute inset-0 z-20 bg-stone-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-4 pointer-events-none"
             >
               <Loader2 className="w-8 h-8 text-cyan-400 animate-spin mb-2.5" />
-              <span className="text-xs font-medium text-stone-300 tracking-wide">
-                Loading clip...
-              </span>
+              <span className="text-xs font-medium text-stone-300 tracking-wide">Loading clip...</span>
             </motion.div>
           )}
         </AnimatePresence>
@@ -226,9 +207,12 @@ export const SoundCard: React.FC<SoundCardProps> = ({
                 onError={() => setImageError(true)}
                 className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105 group-active:scale-100"
                 loading="lazy"
+                decoding="async"
+                fetchPriority="low"
+                width="480"
+                height="270"
               />
             ) : isTikTok ? (
-              /* Sleek TikTok fallback poster */
               <div className="w-full h-full bg-gradient-to-br from-[#2a2623] via-[#201d1b] to-[#181513] flex flex-col items-center justify-center p-4 relative">
                 <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-stone-800/90 border border-stone-700/80 text-stone-200 text-xs font-medium tracking-wide mb-2 shadow-sm">
                   <Video className="w-4 h-4 text-cyan-400" />
@@ -237,7 +221,6 @@ export const SoundCard: React.FC<SoundCardProps> = ({
                 <span className="text-[11px] text-stone-300 font-medium">Tap to play clip</span>
               </div>
             ) : (
-              /* Styled Sound Artwork Canvas instead of empty black box */
               <div className="w-full h-full bg-gradient-to-br from-[#2c2825] via-[#24201e] to-[#1a1816] flex flex-col items-center justify-center p-4 relative overflow-hidden">
                 <div className="w-10 h-10 rounded-xl bg-stone-750/90 border border-stone-650 flex items-center justify-center mb-2 shadow-inner">
                   <Music className="w-5 h-5 text-amber-400" />
@@ -251,10 +234,10 @@ export const SoundCard: React.FC<SoundCardProps> = ({
               </div>
             )}
 
-            {/* Subtle Vignette Gradient - lightened so thumbnail artwork is clearly visible */}
+            {/* Subtle Vignette Gradient */}
             <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/10 opacity-70 group-hover:opacity-50 transition-opacity pointer-events-none" />
 
-            {/* Tap-Friendly Center Play Button */}
+            {/* Center Play Button */}
             <motion.div
               whileTap={{ scale: 0.9 }}
               className={`absolute z-10 w-12 h-12 sm:w-14 sm:h-14 rounded-full ${accent.buttonBg} flex items-center justify-center shadow-xl shadow-black/70 transition-transform`}
@@ -293,7 +276,6 @@ export const SoundCard: React.FC<SoundCardProps> = ({
 
         {/* Action Controls: Play/Stop, TikTok Unmute Toggle, External Link */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {/* Dedicated Mute/Unmute toggle button for active TikTok video */}
           {isCurrentTikTokActive && (
             <button
               type="button"
@@ -314,7 +296,6 @@ export const SoundCard: React.FC<SoundCardProps> = ({
             </button>
           )}
 
-          {/* Main Play / Stop Button */}
           <button
             id={`btn-play-${sound.id}`}
             type="button"
@@ -356,3 +337,5 @@ export const SoundCard: React.FC<SoundCardProps> = ({
     </div>
   );
 };
+
+export const SoundCard = React.memo(SoundCardComponent);

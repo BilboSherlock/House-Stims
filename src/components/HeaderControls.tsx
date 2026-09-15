@@ -13,7 +13,7 @@ interface HeaderControlsProps {
   onOpenCodeGenerator?: () => void;
 }
 
-export const HeaderControls: React.FC<HeaderControlsProps> = ({
+const HeaderControlsComponent: React.FC<HeaderControlsProps> = ({
   title,
   subtitle,
   activeCount,
@@ -107,3 +107,5 @@ export const HeaderControls: React.FC<HeaderControlsProps> = ({
     </header>
   );
 };
+
+export const HeaderControls = React.memo(HeaderControlsComponent);

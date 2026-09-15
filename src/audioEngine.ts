@@ -2,72 +2,75 @@ import { SoundItem } from './types';
 import { youtubeEngine } from './utils/youtubePlayer';
 import { tiktokEngine } from './utils/tiktokPlayer';
 import { isTikTokUrl } from './utils/tiktok';
+import { playProceduralSynth } from './utils/synthesizer';
+
+export interface SoundTiming {
+  start: number;
+  duration?: number;
+  endTime?: number;
+}
+
+export function resolveClipTiming(sound: SoundItem): SoundTiming {
+  const start = sound.startTime ?? sound.youtubeStartTime ?? 0;
+  let duration: number | undefined = sound.duration ?? sound.youtubeDuration;
+  if (duration === undefined && sound.endTime !== undefined) {
+    duration = Math.max(0.1, sound.endTime - start);
+  }
+  return { start, duration, endTime: sound.endTime };
+}
 
 class AudioEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
-  private bufferCache = new Map<string, AudioBuffer>();
-  private activeSources = new Map<string, Array<() => void>>();
-  private activeSoundIds = new Set<string>();
-  private listeners = new Set<(activeIds: string[]) => void>();
+  private readonly bufferCache = new Map<string, AudioBuffer>();
+  private readonly activeSources = new Map<string, Array<() => void>>();
+  private readonly activeSoundIds = new Set<string>();
+  private readonly listeners = new Set<(activeIds: ReadonlySet<string>) => void>();
   private volume: number = 0.85;
   private isMuted: boolean = false;
   private lastYtSoundId: string | null = null;
   private lastTikTokSoundId: string | null = null;
 
   constructor() {
-    // Listen for YouTube engine playback state changes
-    youtubeEngine.registerStateCallback((soundId, isPlaying) => {
-      if (!soundId) {
-        // Clear any youtube sound from active ids
-        const toDelete: string[] = [];
-        this.activeSoundIds.forEach((id) => {
-          if (id.startsWith('yt-') || id === this.lastYtSoundId) {
-            toDelete.push(id);
-          }
-        });
-        toDelete.forEach((id) => this.activeSoundIds.delete(id));
-        this.notify();
-      } else {
-        if (isPlaying) {
-          this.activeSoundIds.add(soundId);
-          this.lastYtSoundId = soundId;
-        } else {
-          this.activeSoundIds.delete(soundId);
-        }
-        this.notify();
-      }
-    });
+    this.bindExternalEngine(youtubeEngine, 'yt-', (id) => (this.lastYtSoundId = id), () => this.lastYtSoundId);
+    this.bindExternalEngine(tiktokEngine, 'tiktok-', (id) => (this.lastTikTokSoundId = id), () => this.lastTikTokSoundId);
+  }
 
-    // Listen for TikTok engine playback state changes
-    tiktokEngine.registerStateCallback((soundId, isPlaying) => {
+  private bindExternalEngine(
+    engine: { registerStateCallback: (cb: (soundId: string | null, isPlaying: boolean) => void) => void },
+    prefix: string,
+    setLastId: (id: string | null) => void,
+    getLastId: () => string | null
+  ) {
+    engine.registerStateCallback((soundId, isPlaying) => {
       if (!soundId) {
+        const lastId = getLastId();
         const toDelete: string[] = [];
         this.activeSoundIds.forEach((id) => {
-          if (id.startsWith('tiktok-') || id === this.lastTikTokSoundId) {
+          if (id.startsWith(prefix) || id === lastId) {
             toDelete.push(id);
           }
         });
         toDelete.forEach((id) => this.activeSoundIds.delete(id));
-        this.notify();
       } else {
         if (isPlaying) {
           this.activeSoundIds.add(soundId);
-          this.lastTikTokSoundId = soundId;
+          setLastId(soundId);
         } else {
           this.activeSoundIds.delete(soundId);
         }
-        this.notify();
       }
+      this.notify();
     });
   }
 
   private initContext(): AudioContext {
     if (!this.ctx) {
-      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioContextClass =
+        window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new AudioContextClass();
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
+      this.applyGainNodeVolume();
       this.masterGain.connect(this.ctx.destination);
     }
     if (this.ctx.state === 'suspended') {
@@ -76,24 +79,31 @@ class AudioEngine {
     return this.ctx;
   }
 
-  public subscribe(listener: (activeIds: string[]) => void) {
+  private applyGainNodeVolume() {
+    if (this.masterGain && this.ctx) {
+      this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
+    }
+  }
+
+  public subscribe(listener: (activeIds: ReadonlySet<string>) => void) {
     this.listeners.add(listener);
-    listener(Array.from(this.activeSoundIds));
+    listener(this.activeSoundIds);
     return () => {
       this.listeners.delete(listener);
     };
   }
 
+  public getActiveIds(): ReadonlySet<string> {
+    return this.activeSoundIds;
+  }
+
   private notify() {
-    const list = Array.from(this.activeSoundIds);
-    this.listeners.forEach((fn) => fn(list));
+    this.listeners.forEach((fn) => fn(this.activeSoundIds));
   }
 
   public setVolume(vol: number) {
     this.volume = Math.max(0, Math.min(1, vol));
-    if (this.masterGain && this.ctx) {
-      this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
-    }
+    this.applyGainNodeVolume();
     youtubeEngine.setVolume(this.volume);
     tiktokEngine.setVolume(this.volume * 100);
   }
@@ -104,9 +114,7 @@ class AudioEngine {
 
   public setMuted(muted: boolean) {
     this.isMuted = muted;
-    if (this.masterGain && this.ctx) {
-      this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
-    }
+    this.applyGainNodeVolume();
     youtubeEngine.setMuted(muted);
     if (muted) {
       tiktokEngine.mute();
@@ -128,9 +136,7 @@ class AudioEngine {
       stoppers.forEach((stop) => {
         try {
           stop();
-        } catch {
-          // ignore
-        }
+        } catch {}
       });
     });
     this.activeSources.clear();
@@ -152,9 +158,7 @@ class AudioEngine {
       stoppers.forEach((stop) => {
         try {
           stop();
-        } catch {
-          // ignore
-        }
+        } catch {}
       });
       this.activeSources.delete(soundId);
     }
@@ -172,18 +176,15 @@ class AudioEngine {
       const decoded = await ctx.decodeAudioData(arrayBuffer);
       this.bufferCache.set(audioSrc, decoded);
     } catch {
-      // Quietly ignore network/preload failures
+      // Quietly ignore network failures
     }
   }
 
   public async play(sound: SoundItem, allowPolyphony = false, targetElementId?: string): Promise<void> {
-    // Optional tactile haptic feedback for phone use
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
       try {
         navigator.vibrate(15);
-      } catch {
-        // Safe fail
-      }
+      } catch {}
     }
 
     if (!allowPolyphony) {
@@ -191,50 +192,25 @@ class AudioEngine {
     }
 
     const containerId = targetElementId || `media-embed-${sound.id}`;
+    const { start, duration, endTime } = resolveClipTiming(sound);
 
-    // Calculate start time and duration segment if defined
-    const start = sound.startTime ?? sound.youtubeStartTime ?? 0;
-    let duration: number | undefined = sound.duration ?? sound.youtubeDuration;
-    if (duration === undefined && sound.endTime !== undefined) {
-      duration = Math.max(0.1, sound.endTime - start);
-    }
-
-    // Check if sound is a TikTok clip (explicit tiktokUrl or youtubeUrl that is actually TikTok)
+    // 1. TikTok clip
     const rawTikTokUrl = sound.tiktokUrl || (sound.youtubeUrl && isTikTokUrl(sound.youtubeUrl) ? sound.youtubeUrl : undefined);
     if (rawTikTokUrl && rawTikTokUrl.trim() !== '') {
       this.markActive(sound.id);
-
-      const played = tiktokEngine.playInContainer(
-        containerId,
-        sound.id,
-        rawTikTokUrl,
-        start,
-        duration,
-        sound.endTime,
-        () => {
-          this.markInactive(sound.id);
-        }
-      );
-      if (played) {
-        return;
-      }
+      const played = tiktokEngine.playInContainer(containerId, sound.id, rawTikTokUrl, start, duration, endTime, () => {
+        this.markInactive(sound.id);
+      });
+      if (played) return;
     }
 
-    // Check if sound is a YouTube clip (plays both video and audio)
+    // 2. YouTube clip
     if (sound.youtubeUrl && sound.youtubeUrl.trim() !== '' && !isTikTokUrl(sound.youtubeUrl)) {
       this.markActive(sound.id);
       try {
-        await youtubeEngine.playInContainer(
-          containerId,
-          sound.id,
-          sound.youtubeUrl,
-          start,
-          duration,
-          sound.endTime,
-          () => {
-            this.markInactive(sound.id);
-          }
-        );
+        await youtubeEngine.playInContainer(containerId, sound.id, sound.youtubeUrl, start, duration, endTime, () => {
+          this.markInactive(sound.id);
+        });
         return;
       } catch (err) {
         console.warn('Could not play YouTube video clip:', err);
@@ -244,20 +220,17 @@ class AudioEngine {
     const ctx = this.initContext();
     if (!this.masterGain) return;
 
-    // Register active id
+    // 3. Local audio file or procedural Web Audio stim synth
     this.markActive(sound.id);
-
-    // If local audio file path is provided and cached or fetchable:
     if (sound.audioSrc && sound.audioSrc.trim() !== '') {
       try {
-        await this.playAudioFile(sound, ctx);
+        await this.playAudioFile(sound, ctx, start, duration, endTime);
         return;
       } catch (err) {
-        console.warn(`Could not play audioSrc "${sound.audioSrc}", falling back to procedural stim sound.`, err);
+        console.warn(`Fallback to procedural stim sound for "${sound.title}".`, err);
       }
     }
 
-    // Otherwise use procedural Web Audio stim synthesizer
     this.playSynthesizedSound(sound, ctx);
   }
 
@@ -292,7 +265,13 @@ class AudioEngine {
     this.notify();
   }
 
-  private async playAudioFile(sound: SoundItem, ctx: AudioContext): Promise<void> {
+  private async playAudioFile(
+    sound: SoundItem,
+    ctx: AudioContext,
+    startOffset: number,
+    durationSec?: number,
+    endTime?: number
+  ): Promise<void> {
     const src = sound.audioSrc!;
     let buffer = this.bufferCache.get(src);
 
@@ -309,9 +288,7 @@ class AudioEngine {
     source.loop = !!sound.loop;
 
     const soundGain = ctx.createGain();
-    const itemVol = sound.volume ?? 1.0;
-    soundGain.gain.setValueAtTime(itemVol, ctx.currentTime);
-
+    soundGain.gain.setValueAtTime(sound.volume ?? 1.0, ctx.currentTime);
     source.connect(soundGain);
     soundGain.connect(this.masterGain!);
 
@@ -320,25 +297,15 @@ class AudioEngine {
         source.stop();
         source.disconnect();
         soundGain.disconnect();
-      } catch {
-        // ignore
-      }
+      } catch {}
     };
 
     this.markActive(sound.id, stopFn);
+    source.onended = () => this.markInactive(sound.id, stopFn);
 
-    source.onended = () => {
-      this.markInactive(sound.id, stopFn);
-    };
-
-    const startOffset = sound.startTime ?? 0;
-    let durationSec: number | undefined = sound.duration;
-    if (durationSec === undefined && sound.endTime !== undefined) {
-      durationSec = Math.max(0.1, sound.endTime - startOffset);
-    }
-
-    if (durationSec !== undefined) {
-      source.start(0, startOffset, durationSec);
+    const dur = durationSec ?? (endTime !== undefined ? Math.max(0.1, endTime - startOffset) : undefined);
+    if (dur !== undefined) {
+      source.start(0, startOffset, dur);
     } else if (startOffset > 0) {
       source.start(0, startOffset);
     } else {
@@ -347,323 +314,11 @@ class AudioEngine {
   }
 
   private playSynthesizedSound(sound: SoundItem, ctx: AudioContext) {
-    const t0 = ctx.currentTime;
-    const soundGain = ctx.createGain();
-    const itemVol = (sound.volume ?? 1.0) * 0.7;
-    soundGain.gain.setValueAtTime(itemVol, t0);
-    soundGain.connect(this.masterGain!);
-
-    let duration = 0.3;
-    const stopCallbacks: Array<() => void> = [];
-
-    const synthType = sound.synthSound || 'bubble-pop';
-
-    switch (synthType) {
-      case 'bubble-pop': {
-        duration = 0.16;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(320, t0);
-        osc.frequency.exponentialRampToValueAtTime(950, t0 + 0.09);
-        osc.frequency.exponentialRampToValueAtTime(600, t0 + duration);
-
-        gain.gain.setValueAtTime(0.01, t0);
-        gain.gain.linearRampToValueAtTime(1.0, t0 + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
-
-        osc.connect(gain);
-        gain.connect(soundGain);
-        osc.start(t0);
-        osc.stop(t0 + duration);
-        stopCallbacks.push(() => {
-          try {
-            osc.stop();
-          } catch {}
-        });
-        break;
-      }
-
-      case 'wooden-tap': {
-        duration = 0.18;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        const filter = ctx.createBiquadFilter();
-
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(740, t0);
-        osc.frequency.exponentialRampToValueAtTime(160, t0 + duration);
-
-        filter.type = 'bandpass';
-        filter.frequency.setValueAtTime(850, t0);
-        filter.Q.setValueAtTime(5, t0);
-
-        gain.gain.setValueAtTime(1.0, t0);
-        gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
-
-        osc.connect(filter);
-        filter.connect(gain);
-        gain.connect(soundGain);
-        osc.start(t0);
-        osc.stop(t0 + duration);
-        stopCallbacks.push(() => {
-          try {
-            osc.stop();
-          } catch {}
-        });
-        break;
-      }
-
-      case 'click-snap': {
-        duration = 0.07;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'square';
-        osc.frequency.setValueAtTime(1800, t0);
-        osc.frequency.exponentialRampToValueAtTime(200, t0 + duration);
-
-        gain.gain.setValueAtTime(0.7, t0);
-        gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
-
-        osc.connect(gain);
-        gain.connect(soundGain);
-        osc.start(t0);
-        osc.stop(t0 + duration);
-        stopCallbacks.push(() => {
-          try {
-            osc.stop();
-          } catch {}
-        });
-        break;
-      }
-
-      case 'chime-high': {
-        duration = 0.65;
-        const freqs = [880, 1320, 1760];
-        freqs.forEach((f, idx) => {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(f, t0 + idx * 0.03);
-
-          gain.gain.setValueAtTime(0.4 / (idx + 1), t0 + idx * 0.03);
-          gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
-
-          osc.connect(gain);
-          gain.connect(soundGain);
-          osc.start(t0 + idx * 0.03);
-          osc.stop(t0 + duration);
-          stopCallbacks.push(() => {
-            try {
-              osc.stop();
-            } catch {}
-          });
-        });
-        break;
-      }
-
-      case 'marimba-note': {
-        duration = 0.35;
-        const osc = ctx.createOscillator();
-        const oscHarmonic = ctx.createOscillator();
-        const gain = ctx.createGain();
-
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(440, t0);
-
-        oscHarmonic.type = 'sine';
-        oscHarmonic.frequency.setValueAtTime(1320, t0);
-
-        gain.gain.setValueAtTime(1.0, t0);
-        gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
-
-        osc.connect(gain);
-        oscHarmonic.connect(gain);
-        gain.connect(soundGain);
-
-        osc.start(t0);
-        oscHarmonic.start(t0);
-        osc.stop(t0 + duration);
-        oscHarmonic.stop(t0 + duration);
-        stopCallbacks.push(() => {
-          try {
-            osc.stop();
-            oscHarmonic.stop();
-          } catch {}
-        });
-        break;
-      }
-
-      case 'calm-gong': {
-        duration = 1.2;
-        const base = 261.63; // C4
-        [1, 2.76, 5.4].forEach((ratio, i) => {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(base * ratio, t0);
-
-          gain.gain.setValueAtTime(0.5 / (i + 1), t0);
-          gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
-
-          osc.connect(gain);
-          gain.connect(soundGain);
-          osc.start(t0);
-          osc.stop(t0 + duration);
-          stopCallbacks.push(() => {
-            try {
-              osc.stop();
-            } catch {}
-          });
-        });
-        break;
-      }
-
-      case 'spring-boing': {
-        duration = 0.45;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(280, t0);
-        osc.frequency.linearRampToValueAtTime(620, t0 + 0.12);
-        osc.frequency.linearRampToValueAtTime(240, t0 + 0.24);
-        osc.frequency.linearRampToValueAtTime(480, t0 + 0.36);
-        osc.frequency.linearRampToValueAtTime(300, t0 + duration);
-
-        gain.gain.setValueAtTime(0.8, t0);
-        gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
-
-        osc.connect(gain);
-        gain.connect(soundGain);
-        osc.start(t0);
-        osc.stop(t0 + duration);
-        stopCallbacks.push(() => {
-          try {
-            osc.stop();
-          } catch {}
-        });
-        break;
-      }
-
-      case 'laser-blip': {
-        duration = 0.2;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(1400, t0);
-        osc.frequency.exponentialRampToValueAtTime(90, t0 + duration);
-
-        gain.gain.setValueAtTime(0.5, t0);
-        gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
-
-        osc.connect(gain);
-        gain.connect(soundGain);
-        osc.start(t0);
-        osc.stop(t0 + duration);
-        stopCallbacks.push(() => {
-          try {
-            osc.stop();
-          } catch {}
-        });
-        break;
-      }
-
-      case 'gentle-purr': {
-        duration = 0.7;
-        const osc = ctx.createOscillator();
-        const lfo = ctx.createOscillator();
-        const lfoGain = ctx.createGain();
-        const mainGain = ctx.createGain();
-
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(80, t0);
-
-        lfo.type = 'sine';
-        lfo.frequency.setValueAtTime(24, t0); // 24Hz purr flutter
-
-        lfoGain.gain.setValueAtTime(0.5, t0);
-        lfo.connect(lfoGain);
-
-        mainGain.gain.setValueAtTime(0.5, t0);
-        mainGain.gain.exponentialRampToValueAtTime(0.01, t0 + duration);
-
-        osc.connect(mainGain);
-        mainGain.connect(soundGain);
-
-        osc.start(t0);
-        lfo.start(t0);
-        osc.stop(t0 + duration);
-        lfo.stop(t0 + duration);
-        stopCallbacks.push(() => {
-          try {
-            osc.stop();
-            lfo.stop();
-          } catch {}
-        });
-        break;
-      }
-
-      case 'sub-thump': {
-        duration = 0.25;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(130, t0);
-        osc.frequency.exponentialRampToValueAtTime(40, t0 + duration);
-
-        gain.gain.setValueAtTime(1.0, t0);
-        gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
-
-        osc.connect(gain);
-        gain.connect(soundGain);
-        osc.start(t0);
-        osc.stop(t0 + duration);
-        stopCallbacks.push(() => {
-          try {
-            osc.stop();
-          } catch {}
-        });
-        break;
-      }
-
-      case 'empty':
-      default: {
-        // Friendly clean blip for empty placeholder slots
-        duration = 0.18;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(520, t0);
-        osc.frequency.exponentialRampToValueAtTime(660, t0 + 0.08);
-
-        gain.gain.setValueAtTime(0.4, t0);
-        gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
-
-        osc.connect(gain);
-        gain.connect(soundGain);
-        osc.start(t0);
-        osc.stop(t0 + duration);
-        stopCallbacks.push(() => {
-          try {
-            osc.stop();
-          } catch {}
-        });
-        break;
-      }
-    }
-
-    const allStop = () => {
-      stopCallbacks.forEach((cb) => cb());
-      try {
-        soundGain.disconnect();
-      } catch {}
-    };
-
-    this.markActive(sound.id, allStop);
-
+    const synthHandle = playProceduralSynth(ctx, this.masterGain!, sound.synthSound, sound.volume ?? 1.0);
+    this.markActive(sound.id, synthHandle.stop);
     setTimeout(() => {
-      this.markInactive(sound.id, allStop);
-    }, duration * 1000 + 30);
+      this.markInactive(sound.id, synthHandle.stop);
+    }, synthHandle.duration * 1000 + 30);
   }
 }
 

@@ -168,7 +168,6 @@ class TikTokEngine {
             }
             // Fire unmute once more when playback starts
             this.unmute();
-            this.notify();
 
             // Calibrated playback stop timer:
             // Crucial: Only start/adjust timer when the media is ACTUALLY PLAYING.

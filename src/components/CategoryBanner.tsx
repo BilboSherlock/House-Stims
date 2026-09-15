@@ -60,7 +60,7 @@ const DEFAULT_CATEGORY_STYLE: CategoryStyle = {
   bannerGradient: 'from-stone-850 via-stone-900/80 to-stone-900/60',
 };
 
-export const CategoryBanner: React.FC<CategoryBannerProps> = ({
+const CategoryBannerComponent: React.FC<CategoryBannerProps> = ({
   category,
   count,
   isPlaying = false,
@@ -96,3 +96,5 @@ export const CategoryBanner: React.FC<CategoryBannerProps> = ({
     </div>
   );
 };
+
+export const CategoryBanner = React.memo(CategoryBannerComponent);
