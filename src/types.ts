@@ -15,9 +15,21 @@ export interface SoundItem {
    * If provided, the soundboard will play the audio directly from YouTube!
    */
   youtubeUrl?: string;
-  /** Optional start offset in seconds for YouTube clip */
+  /** Optional TikTok URL or video ID (e.g. 'https://www.tiktok.com/@.../video/7682884362580397334' or 'https://vm.tiktok.com/ZN8jHUyaS/') */
+  tiktokUrl?: string;
+  /** Optional general video URL (YouTube or TikTok or direct video) */
+  videoUrl?: string;
+  /** Optional custom thumbnail preview image */
+  thumbnailUrl?: string;
+  /** Optional start offset in seconds for clip playback (supports YouTube, TikTok, and audio) */
+  startTime?: number;
+  /** Optional end offset in seconds for clip playback (stops playback when reached) */
+  endTime?: number;
+  /** Optional duration in seconds for clip playback */
+  duration?: number;
+  /** Optional start offset in seconds for YouTube clip (alias for startTime) */
   youtubeStartTime?: number;
-  /** Optional duration or end offset in seconds for YouTube clip */
+  /** Optional duration or end offset in seconds for YouTube clip (alias for duration) */
   youtubeDuration?: number;
   /**
    * Built-in zero-dependency sound synthesizer used if audioSrc is empty or fails to load.

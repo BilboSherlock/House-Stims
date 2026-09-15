@@ -1,5 +1,7 @@
 import { SoundItem } from './types';
 import { youtubeEngine } from './utils/youtubePlayer';
+import { tiktokEngine } from './utils/tiktokPlayer';
+import { isTikTokUrl } from './utils/tiktok';
 
 class AudioEngine {
   private ctx: AudioContext | null = null;
@@ -10,6 +12,8 @@ class AudioEngine {
   private listeners = new Set<(activeIds: string[]) => void>();
   private volume: number = 0.85;
   private isMuted: boolean = false;
+  private lastYtSoundId: string | null = null;
+  private lastTikTokSoundId: string | null = null;
 
   constructor() {
     // Listen for YouTube engine playback state changes
@@ -34,9 +38,29 @@ class AudioEngine {
         this.notify();
       }
     });
-  }
 
-  private lastYtSoundId: string | null = null;
+    // Listen for TikTok engine playback state changes
+    tiktokEngine.registerStateCallback((soundId, isPlaying) => {
+      if (!soundId) {
+        const toDelete: string[] = [];
+        this.activeSoundIds.forEach((id) => {
+          if (id.startsWith('tiktok-') || id === this.lastTikTokSoundId) {
+            toDelete.push(id);
+          }
+        });
+        toDelete.forEach((id) => this.activeSoundIds.delete(id));
+        this.notify();
+      } else {
+        if (isPlaying) {
+          this.activeSoundIds.add(soundId);
+          this.lastTikTokSoundId = soundId;
+        } else {
+          this.activeSoundIds.delete(soundId);
+        }
+        this.notify();
+      }
+    });
+  }
 
   private initContext(): AudioContext {
     if (!this.ctx) {
@@ -71,6 +95,7 @@ class AudioEngine {
       this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
     }
     youtubeEngine.setVolume(this.volume);
+    tiktokEngine.setVolume(this.volume * 100);
   }
 
   public getVolume(): number {
@@ -83,6 +108,11 @@ class AudioEngine {
       this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
     }
     youtubeEngine.setMuted(muted);
+    if (muted) {
+      tiktokEngine.mute();
+    } else {
+      tiktokEngine.unmute();
+    }
   }
 
   public getIsMuted(): boolean {
@@ -106,12 +136,16 @@ class AudioEngine {
     this.activeSources.clear();
     this.activeSoundIds.clear();
     youtubeEngine.stop();
+    tiktokEngine.stop();
     this.notify();
   }
 
   public stopSound(soundId: string) {
     if (youtubeEngine.getCurrentSoundId() === soundId) {
       youtubeEngine.stop();
+    }
+    if (tiktokEngine.getCurrentSoundId() === soundId) {
+      tiktokEngine.stop();
     }
     const stoppers = this.activeSources.get(soundId);
     if (stoppers) {
@@ -156,17 +190,47 @@ class AudioEngine {
       this.stopAll();
     }
 
-    // Check if sound is a YouTube clip (plays both video and audio)
-    if (sound.youtubeUrl && sound.youtubeUrl.trim() !== '') {
+    const containerId = targetElementId || `media-embed-${sound.id}`;
+
+    // Calculate start time and duration segment if defined
+    const start = sound.startTime ?? sound.youtubeStartTime ?? 0;
+    let duration: number | undefined = sound.duration ?? sound.youtubeDuration;
+    if (duration === undefined && sound.endTime !== undefined) {
+      duration = Math.max(0.1, sound.endTime - start);
+    }
+
+    // Check if sound is a TikTok clip (explicit tiktokUrl or youtubeUrl that is actually TikTok)
+    const rawTikTokUrl = sound.tiktokUrl || (sound.youtubeUrl && isTikTokUrl(sound.youtubeUrl) ? sound.youtubeUrl : undefined);
+    if (rawTikTokUrl && rawTikTokUrl.trim() !== '') {
       this.markActive(sound.id);
-      const containerId = targetElementId || `yt-embed-${sound.id}`;
+
+      const played = tiktokEngine.playInContainer(
+        containerId,
+        sound.id,
+        rawTikTokUrl,
+        start,
+        duration,
+        sound.endTime,
+        () => {
+          this.markInactive(sound.id);
+        }
+      );
+      if (played) {
+        return;
+      }
+    }
+
+    // Check if sound is a YouTube clip (plays both video and audio)
+    if (sound.youtubeUrl && sound.youtubeUrl.trim() !== '' && !isTikTokUrl(sound.youtubeUrl)) {
+      this.markActive(sound.id);
       try {
         await youtubeEngine.playInContainer(
           containerId,
           sound.id,
           sound.youtubeUrl,
-          sound.youtubeStartTime || 0,
-          sound.youtubeDuration,
+          start,
+          duration,
+          sound.endTime,
           () => {
             this.markInactive(sound.id);
           }
@@ -267,7 +331,19 @@ class AudioEngine {
       this.markInactive(sound.id, stopFn);
     };
 
-    source.start(0);
+    const startOffset = sound.startTime ?? 0;
+    let durationSec: number | undefined = sound.duration;
+    if (durationSec === undefined && sound.endTime !== undefined) {
+      durationSec = Math.max(0.1, sound.endTime - startOffset);
+    }
+
+    if (durationSec !== undefined) {
+      source.start(0, startOffset, durationSec);
+    } else if (startOffset > 0) {
+      source.start(0, startOffset);
+    } else {
+      source.start(0);
+    }
   }
 
   private playSynthesizedSound(sound: SoundItem, ctx: AudioContext) {

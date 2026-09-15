@@ -36,6 +36,8 @@ export interface YTPlayerInstance {
   pauseVideo: () => void;
   stopVideo: () => void;
   seekTo: (seconds: number, allowSeekAhead?: boolean) => void;
+  getCurrentTime: () => number;
+  getDuration: () => number;
   setVolume: (volume: number) => void;
   mute: () => void;
   unMute: () => void;
@@ -51,6 +53,10 @@ class YouTubeEngine {
   private player: YTPlayerInstance | null = null;
   private currentSoundId: string | null = null;
   private stopTimer: number | null = null;
+  private monitorIntervalId: number | null = null;
+  private startTime: number = 0;
+  private endTime?: number;
+  private duration?: number;
   private volume: number = 85;
   private isMuted: boolean = false;
   private onStateChangeCallback: ((soundId: string | null, isPlaying: boolean) => void) | null = null;
@@ -100,6 +106,7 @@ class YouTubeEngine {
     youtubeUrlOrId: string,
     startTime: number = 0,
     duration?: number,
+    endTime?: number,
     onEnded?: () => void
   ): Promise<void> {
     const videoId = extractYouTubeId(youtubeUrlOrId);
@@ -110,20 +117,12 @@ class YouTubeEngine {
 
     await this.loadApi();
 
-    if (this.stopTimer) {
-      window.clearTimeout(this.stopTimer);
-      this.stopTimer = null;
-    }
-
-    // Clean up previous player
-    if (this.player) {
-      try {
-        this.player.destroy();
-      } catch {}
-      this.player = null;
-    }
+    this.stop();
 
     this.currentSoundId = soundId;
+    this.startTime = Math.max(0, startTime);
+    this.endTime = endTime !== undefined ? endTime : (duration && duration > 0 ? this.startTime + duration : undefined);
+    this.duration = duration ?? (this.endTime !== undefined ? Math.max(0.1, this.endTime - this.startTime) : undefined);
 
     const targetContainer = document.getElementById(targetElementId);
     if (!targetContainer) {
@@ -146,7 +145,8 @@ class YouTubeEngine {
         controls: 1,
         modestbranding: 1,
         rel: 0,
-        start: startTime > 0 ? Math.floor(startTime) : undefined,
+        start: this.startTime > 0 ? Math.floor(this.startTime) : undefined,
+        end: this.endTime !== undefined ? Math.ceil(this.endTime) : undefined,
         playsinline: 1,
         iv_load_policy: 3,
       },
@@ -154,34 +154,32 @@ class YouTubeEngine {
         onReady: (event) => {
           this.player = event.target;
           this.applyVolume();
-          if (startTime > 0) {
-            this.player.seekTo(startTime, true);
+          if (this.startTime > 0) {
+            this.player.seekTo(this.startTime, true);
           }
           this.player.playVideo();
           this.onStateChangeCallback?.(soundId, true);
-
-          if (duration && duration > 0) {
-            this.stopTimer = window.setTimeout(() => {
-              this.stop();
-              onEnded?.();
-            }, duration * 1000);
-          }
         },
         onStateChange: (event) => {
           if (event.data === window.YT?.PlayerState.ENDED) {
+            this.stopMonitor();
             this.currentSoundId = null;
             this.onStateChangeCallback?.(null, false);
             onEnded?.();
           } else if (event.data === window.YT?.PlayerState.PLAYING) {
             this.onStateChangeCallback?.(this.currentSoundId, true);
-          } else if (
-            event.data === window.YT?.PlayerState.PAUSED
-          ) {
+            this.startMonitor(onEnded);
+          } else if (event.data === window.YT?.PlayerState.PAUSED) {
+            this.stopMonitor();
             this.onStateChangeCallback?.(null, false);
+          } else if (event.data === window.YT?.PlayerState.BUFFERING) {
+            // Buffering: pause monitor so buffered time does not count against runtime
+            this.stopMonitor();
           }
         },
         onError: (err) => {
           console.warn('YouTube Player error code:', err.data);
+          this.stopMonitor();
           this.currentSoundId = null;
           this.onStateChangeCallback?.(null, false);
         },
@@ -189,7 +187,43 @@ class YouTubeEngine {
     });
   }
 
+  private startMonitor(onEnded?: () => void) {
+    this.stopMonitor();
+    if (this.endTime === undefined) return;
+
+    const targetEnd = this.endTime;
+    this.monitorIntervalId = window.setInterval(() => {
+      if (!this.player || !this.currentSoundId) {
+        this.stopMonitor();
+        return;
+      }
+      try {
+        const currentTime = this.player.getCurrentTime();
+        if (typeof currentTime === 'number' && currentTime >= 0) {
+          // If playback started before the requested start time, seek ahead
+          if (this.startTime > 0 && currentTime < this.startTime - 0.5) {
+            this.player.seekTo(this.startTime, true);
+          }
+
+          if (currentTime >= targetEnd) {
+            this.stopMonitor();
+            this.stop();
+            onEnded?.();
+          }
+        }
+      } catch {}
+    }, 50);
+  }
+
+  private stopMonitor() {
+    if (this.monitorIntervalId) {
+      window.clearInterval(this.monitorIntervalId);
+      this.monitorIntervalId = null;
+    }
+  }
+
   public stop(): void {
+    this.stopMonitor();
     if (this.stopTimer) {
       window.clearTimeout(this.stopTimer);
       this.stopTimer = null;

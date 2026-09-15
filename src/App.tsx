@@ -4,11 +4,13 @@ import { audioEngine } from './audioEngine';
 import { SoundItem } from './types';
 import { SoundCard } from './components/SoundCard';
 import { HeaderControls } from './components/HeaderControls';
+import { LinkCodeGeneratorModal } from './components/LinkCodeGeneratorModal';
 
 export default function App() {
   const [activeSoundIds, setActiveSoundIds] = useState<string[]>([]);
   const [volume, setVolume] = useState<number>(() => audioEngine.getVolume());
   const [isMuted, setIsMuted] = useState<boolean>(() => audioEngine.getIsMuted());
+  const [isCodeModalOpen, setIsCodeModalOpen] = useState<boolean>(false);
 
   // Subscribe to audio engine active playback states
   useEffect(() => {
@@ -60,6 +62,7 @@ export default function App() {
         isMuted={isMuted}
         onVolumeChange={handleVolumeChange}
         onMuteToggle={handleMuteToggle}
+        onOpenCodeGenerator={() => setIsCodeModalOpen(true)}
       />
 
       {/* Main Responsive Grid */}
@@ -79,6 +82,12 @@ export default function App() {
           })}
         </div>
       </main>
+
+      {/* Simple Streamlined Link to Backend Code Generator Modal */}
+      <LinkCodeGeneratorModal
+        isOpen={isCodeModalOpen}
+        onClose={() => setIsCodeModalOpen(false)}
+      />
     </div>
   );
 }
