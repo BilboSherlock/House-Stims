@@ -12,15 +12,46 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>
+      // Automatically ensure trailing slash on GitHub Pages so relative asset paths always resolve correctly
+      if (window.location.hostname.endsWith('github.io')) {
+        var path = window.location.pathname;
+        if (!path.endsWith('/') && !path.split('/').pop().includes('.')) {
+          window.location.replace(window.location.protocol + '//' + window.location.host + path + '/' + window.location.search + window.location.hash);
+        }
+      }
+      window.__appLoadError = null;
+      window.addEventListener('error', function(e) {
+        window.__appLoadError = e.message || 'Script failed to load';
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        window.__appLoadError = (e.reason && e.reason.message) || String(e.reason);
+      });
+    </script>
   </head>
   <body style="background-color: #0c0a09; color: #f5f5f4; margin: 0; min-height: 100vh;" class="bg-stone-900 text-stone-100 antialiased select-none font-['Plus_Jakarta_Sans',sans-serif]">
     <div id="root">
-      <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: #0c0a09; color: #a8a29e; font-family: system-ui, -apple-system, sans-serif; padding: 24px; text-align: center;">
-        <div style="width: 10px; height: 10px; border-radius: 50%; background-color: #10b981; margin-bottom: 12px;"></div>
+      <div id="app-loader" style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: #0c0a09; color: #a8a29e; font-family: system-ui, -apple-system, sans-serif; padding: 24px; text-align: center;">
+        <div style="width: 10px; height: 10px; border-radius: 50%; background-color: #10b981; margin-bottom: 12px; animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>
         <div style="font-size: 15px; font-weight: 600; color: #f5f5f4; margin-bottom: 4px;">House Stims</div>
         <div style="font-size: 12px; color: #78716c;">Loading soundboard...</div>
       </div>
     </div>
+    <script>
+      // If React takes more than 4 seconds to mount (e.g. slow network or asset resolution error), show troubleshooting card
+      setTimeout(function() {
+        var loader = document.getElementById('app-loader');
+        if (loader && document.body.contains(loader)) {
+          var details = window.__appLoadError ? ('Error: ' + window.__appLoadError) : 'Assets may still be loading or were blocked by the browser.';
+          loader.innerHTML = '<div style="max-width: 420px; margin: 0 auto; background: #1c1917; border: 1px solid #44403c; border-radius: 16px; padding: 24px; text-align: center; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);">' +
+            '<div style="width: 40px; height: 40px; border-radius: 50%; background: rgba(245, 158, 11, 0.15); color: #f59e0b; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px auto; font-size: 20px;">⚡</div>' +
+            '<div style="font-size: 15px; font-weight: 600; color: #f5f5f4; margin-bottom: 8px;">Soundboard is taking longer to load</div>' +
+            '<div style="font-size: 12px; color: #a8a29e; margin-bottom: 20px; line-height: 1.5; font-family: monospace; background: #141211; padding: 8px 12px; border-radius: 8px; word-break: break-word;">' + details + '</div>' +
+            '<button onclick="window.location.reload()" style="background: #f59e0b; color: #0c0a09; font-weight: 600; font-size: 13px; padding: 10px 20px; border: none; border-radius: 10px; cursor: pointer; transition: background 0.2s;">Reload Page</button>' +
+            '</div>';
+        }
+      }, 4000);
+    </script>
     <noscript>
       <div style="padding: 20px; text-align: center; color: #f87171; background: #1c1917;">
         Please enable JavaScript to use the Stim Soundboard.

@@ -3,27 +3,20 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 
-function resolveBasePath(): string {
-  // 1. Explicitly provided BASE_PATH (e.g. from GitHub actions/configure-pages)
-  if (process.env.BASE_PATH !== undefined) {
-    const p = process.env.BASE_PATH.trim();
-    if (p === '' || p === '/') return '/';
-    return p.endsWith('/') ? p : `${p}/`;
-  }
-
-  // 2. Explicitly provided BASE_URL
-  if (process.env.BASE_URL !== undefined) {
-    const u = process.env.BASE_URL.trim();
-    if (u === '' || u === '/') return '/';
-    return u.endsWith('/') ? u : `${u}/`;
-  }
-
-  // 3. Cloudflare Pages, Vercel, and Netlify host from the root domain
-  if (process.env.CF_PAGES || process.env.VERCEL || process.env.NETLIFY) {
+function resolveBasePath(command: string): string {
+  // In development dev-server, serve from root
+  if (command === 'serve') {
     return '/';
   }
 
-  // 4. GitHub repository detection (e.g. in GitHub Actions without configure-pages)
+  // 1. Explicit non-empty BASE_PATH (e.g. from custom build environment)
+  if (process.env.BASE_PATH && process.env.BASE_PATH.trim() !== '' && process.env.BASE_PATH.trim() !== '/') {
+    const p = process.env.BASE_PATH.trim();
+    const withLeading = p.startsWith('/') ? p : `/${p}`;
+    return withLeading.endsWith('/') ? withLeading : `${withLeading}/`;
+  }
+
+  // 2. GitHub repository detection (works in GitHub Actions and GitHub Pages)
   if (process.env.GITHUB_REPOSITORY) {
     const repoParts = process.env.GITHUB_REPOSITORY.split('/');
     const repoName = repoParts[1] || '';
@@ -36,13 +29,25 @@ function resolveBasePath(): string {
     }
   }
 
-  // 5. Default to relative base ('./') for maximum portability across hosts and subdirectories
+  // 3. Explicit non-empty BASE_URL
+  if (process.env.BASE_URL && process.env.BASE_URL.trim() !== '' && process.env.BASE_URL.trim() !== '/') {
+    const u = process.env.BASE_URL.trim();
+    const withLeading = u.startsWith('/') ? u : `/${u}`;
+    return withLeading.endsWith('/') ? withLeading : `${withLeading}/`;
+  }
+
+  // 4. Cloudflare Pages, Vercel, and Netlify host from the root domain
+  if (process.env.CF_PAGES || process.env.VERCEL || process.env.NETLIFY) {
+    return '/';
+  }
+
+  // 5. Default to relative base ('./') for maximum portability across arbitrary hosts and subdirectories
   return './';
 }
 
-export default defineConfig(() => {
+export default defineConfig(({ command }) => {
   return {
-    base: resolveBasePath(),
+    base: resolveBasePath(command),
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
