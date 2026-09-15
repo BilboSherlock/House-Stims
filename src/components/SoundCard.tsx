@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, Square, ExternalLink, Video, Volume2, VolumeX, Loader2, Clock } from 'lucide-react';
+import { Play, Square, ExternalLink, Video, Volume2, VolumeX, Loader2, Music } from 'lucide-react';
 import { SoundItem } from '../types';
 import { extractYouTubeId } from '../utils/youtube';
 import { isTikTokUrl, extractTikTokId } from '../utils/tiktok';
@@ -15,60 +15,60 @@ interface SoundCardProps {
 
 const COLOR_ACCENTS: Record<string, { border: string; activeRing: string; dot: string; buttonBg: string; activeBtn: string }> = {
   rose: {
-    border: 'border-rose-900/40',
-    activeRing: 'ring-2 ring-rose-500/80 border-rose-500/80 shadow-lg shadow-rose-950/40',
+    border: 'border-rose-900/50',
+    activeRing: 'ring-2 ring-rose-500 border-rose-500 shadow-lg shadow-rose-950/50',
     dot: 'bg-rose-400',
     buttonBg: 'bg-rose-600 hover:bg-rose-500 text-white',
     activeBtn: 'bg-rose-600 text-white',
   },
   amber: {
-    border: 'border-amber-900/40',
-    activeRing: 'ring-2 ring-amber-500/80 border-amber-500/80 shadow-lg shadow-amber-950/40',
+    border: 'border-amber-900/50',
+    activeRing: 'ring-2 ring-amber-500 border-amber-500 shadow-lg shadow-amber-950/50',
     dot: 'bg-amber-400',
     buttonBg: 'bg-amber-500 hover:bg-amber-400 text-stone-950 font-semibold',
     activeBtn: 'bg-amber-500 text-stone-950 font-semibold',
   },
   violet: {
-    border: 'border-violet-900/40',
-    activeRing: 'ring-2 ring-violet-500/80 border-violet-500/80 shadow-lg shadow-violet-950/40',
+    border: 'border-violet-900/50',
+    activeRing: 'ring-2 ring-violet-500 border-violet-500 shadow-lg shadow-violet-950/50',
     dot: 'bg-violet-400',
     buttonBg: 'bg-violet-600 hover:bg-violet-500 text-white',
     activeBtn: 'bg-violet-600 text-white',
   },
   cyan: {
-    border: 'border-cyan-900/40',
-    activeRing: 'ring-2 ring-cyan-500/80 border-cyan-500/80 shadow-lg shadow-cyan-950/40',
+    border: 'border-cyan-900/50',
+    activeRing: 'ring-2 ring-cyan-500 border-cyan-500 shadow-lg shadow-cyan-950/50',
     dot: 'bg-cyan-400',
     buttonBg: 'bg-cyan-500 hover:bg-cyan-400 text-stone-950 font-semibold',
     activeBtn: 'bg-cyan-500 text-stone-950 font-semibold',
   },
   emerald: {
-    border: 'border-emerald-900/40',
-    activeRing: 'ring-2 ring-emerald-500/80 border-emerald-500/80 shadow-lg shadow-emerald-950/40',
+    border: 'border-emerald-900/50',
+    activeRing: 'ring-2 ring-emerald-500 border-emerald-500 shadow-lg shadow-emerald-950/50',
     dot: 'bg-emerald-400',
     buttonBg: 'bg-emerald-500 hover:bg-emerald-400 text-stone-950 font-semibold',
     activeBtn: 'bg-emerald-500 text-stone-950 font-semibold',
   },
   orange: {
-    border: 'border-orange-900/40',
-    activeRing: 'ring-2 ring-orange-500/80 border-orange-500/80 shadow-lg shadow-orange-950/40',
+    border: 'border-orange-900/50',
+    activeRing: 'ring-2 ring-orange-500 border-orange-500 shadow-lg shadow-orange-950/50',
     dot: 'bg-orange-400',
     buttonBg: 'bg-orange-600 hover:bg-orange-500 text-white',
     activeBtn: 'bg-orange-600 text-white',
   },
   black: {
-    border: 'border-stone-800',
-    activeRing: 'ring-2 ring-stone-400/80 border-stone-400/80 shadow-lg shadow-black/50',
+    border: 'border-stone-700',
+    activeRing: 'ring-2 ring-stone-400 border-stone-400 shadow-lg shadow-black/60',
     dot: 'bg-stone-300',
-    buttonBg: 'bg-stone-800 hover:bg-stone-700 text-stone-100',
-    activeBtn: 'bg-stone-800 text-stone-100',
+    buttonBg: 'bg-stone-700 hover:bg-stone-600 text-stone-100 font-medium',
+    activeBtn: 'bg-stone-700 text-stone-100',
   },
   stone: {
-    border: 'border-stone-800',
-    activeRing: 'ring-2 ring-stone-400/80 border-stone-400/80 shadow-lg shadow-black/50',
+    border: 'border-stone-700',
+    activeRing: 'ring-2 ring-stone-400 border-stone-400 shadow-lg shadow-black/60',
     dot: 'bg-stone-300',
-    buttonBg: 'bg-stone-800 hover:bg-stone-700 text-stone-100',
-    activeBtn: 'bg-stone-800 text-stone-100',
+    buttonBg: 'bg-stone-700 hover:bg-stone-600 text-stone-100 font-medium',
+    activeBtn: 'bg-stone-700 text-stone-100',
   },
 };
 
@@ -78,13 +78,15 @@ export const SoundCard: React.FC<SoundCardProps> = ({
   onPlay,
   onStop,
 }) => {
-  const accent = COLOR_ACCENTS[sound.color || 'cyan'] || COLOR_ACCENTS.cyan;
+  const accent = COLOR_ACCENTS[sound.color || 'amber'] || COLOR_ACCENTS.amber;
   const containerId = `media-embed-${sound.id}`;
 
   // Detect media type: TikTok vs YouTube
   const rawTikTok = sound.tiktokUrl || (sound.youtubeUrl && isTikTokUrl(sound.youtubeUrl) ? sound.youtubeUrl : undefined);
   const isTikTok = !!rawTikTok;
   const isYouTube = !isTikTok && !!sound.youtubeUrl && sound.youtubeUrl.trim() !== '';
+
+  const [imageError, setImageError] = useState(false);
 
   // Track TikTok player engine state when active
   const [tiktokState, setTiktokState] = useState<TikTokState>(() => tiktokEngine.getState());
@@ -105,7 +107,11 @@ export const SoundCard: React.FC<SoundCardProps> = ({
 
   // Resolve thumbnail
   let thumbnailUrl = sound.thumbnailUrl || null;
-  if (!thumbnailUrl && ytVideoId) {
+  if (thumbnailUrl && thumbnailUrl.startsWith('/') && !thumbnailUrl.startsWith('//')) {
+    const base = import.meta.env.BASE_URL || './';
+    const cleanBase = base === '/' ? '' : base.replace(/\/$/, '');
+    thumbnailUrl = `${cleanBase}${thumbnailUrl}`;
+  } else if (!thumbnailUrl && ytVideoId) {
     thumbnailUrl = `https://img.youtube.com/vi/${ytVideoId}/hqdefault.jpg`;
   }
 
@@ -116,21 +122,6 @@ export const SoundCard: React.FC<SoundCardProps> = ({
   const isCurrentTikTokActive = isTikTok && isPlaying && tiktokState.soundId === sound.id;
   const isTikTokMuted = isCurrentTikTokActive && tiktokState.isMuted;
   const isTikTokReady = isCurrentTikTokActive && tiktokState.isReady;
-
-  const segmentLabel = (() => {
-    const s = sound.startTime ?? sound.youtubeStartTime;
-    const e = sound.endTime;
-    if (s !== undefined && e !== undefined) {
-      return `${s}s - ${e}s`;
-    }
-    if (e !== undefined) {
-      return `0s - ${e}s`;
-    }
-    if (s !== undefined && s > 0) {
-      return `from ${s}s`;
-    }
-    return null;
-  })();
 
   const handleToggle = (e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -160,16 +151,16 @@ export const SoundCard: React.FC<SoundCardProps> = ({
   return (
     <div
       id={`sound-card-${sound.id}`}
-      className={`relative w-full rounded-2xl bg-stone-900/95 border overflow-hidden transition-all duration-200 flex flex-col ${
-        isPlaying ? accent.activeRing : `${accent.border} hover:border-stone-700`
+      className={`relative w-full rounded-2xl bg-[#23201d] border overflow-hidden transition-all duration-200 flex flex-col group shadow-md shadow-black/40 ${
+        isPlaying ? accent.activeRing : `${accent.border} hover:border-stone-600 hover:bg-[#282421]`
       }`}
     >
       {/* Video & Thumbnail Player Box (16:9 ratio, responsive across mobile & desktop) */}
-      <div className="relative w-full aspect-video bg-stone-950 overflow-hidden select-none">
+      <div className="relative w-full aspect-video bg-[#2d2926] overflow-hidden select-none border-b border-stone-800/80">
         {/* Ambient Blurred Background (smooth backdrop for portrait TikToks & YouTube) */}
-        {thumbnailUrl && (
+        {thumbnailUrl && !imageError && (
           <div
-            className="absolute inset-0 bg-cover bg-center filter blur-xl opacity-20 scale-125 pointer-events-none transition-opacity duration-500"
+            className="absolute inset-0 bg-cover bg-center filter blur-xl opacity-25 scale-125 pointer-events-none transition-opacity duration-500"
             style={{ backgroundImage: `url(${thumbnailUrl})` }}
           />
         )}
@@ -194,7 +185,7 @@ export const SoundCard: React.FC<SoundCardProps> = ({
             >
               <Loader2 className="w-8 h-8 text-cyan-400 animate-spin mb-2.5" />
               <span className="text-xs font-medium text-stone-300 tracking-wide">
-                Loading TikTok clip...
+                Loading clip...
               </span>
             </motion.div>
           )}
@@ -211,7 +202,7 @@ export const SoundCard: React.FC<SoundCardProps> = ({
               transition={{ duration: 0.2 }}
               onClick={handleUnmute}
               className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500 hover:bg-amber-400 text-stone-950 font-semibold text-xs shadow-lg shadow-black/70 active:scale-95 transition-all cursor-pointer border border-amber-300/40"
-              aria-label="Unmute TikTok audio"
+              aria-label="Unmute audio"
             >
               <VolumeX className="w-4 h-4 text-stone-950 fill-current animate-pulse" />
               <span>Tap to Unmute</span>
@@ -227,34 +218,46 @@ export const SoundCard: React.FC<SoundCardProps> = ({
             aria-label={`Play ${sound.title}`}
             className="w-full h-full absolute inset-0 z-0 cursor-pointer overflow-hidden flex items-center justify-center group focus:outline-none"
           >
-            {thumbnailUrl ? (
+            {thumbnailUrl && !imageError ? (
               <img
                 src={thumbnailUrl}
                 alt={sound.title}
                 referrerPolicy="no-referrer"
+                onError={() => setImageError(true)}
                 className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105 group-active:scale-100"
                 loading="lazy"
               />
             ) : isTikTok ? (
               /* Sleek TikTok fallback poster */
-              <div className="w-full h-full bg-gradient-to-br from-stone-900 via-stone-950 to-black flex flex-col items-center justify-center p-4">
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-stone-800/90 border border-stone-700/70 text-stone-200 text-xs font-medium tracking-wide mb-2 shadow-sm">
+              <div className="w-full h-full bg-gradient-to-br from-[#2a2623] via-[#201d1b] to-[#181513] flex flex-col items-center justify-center p-4 relative">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-stone-800/90 border border-stone-700/80 text-stone-200 text-xs font-medium tracking-wide mb-2 shadow-sm">
                   <Video className="w-4 h-4 text-cyan-400" />
                   <span>TikTok Video</span>
                 </div>
-                <span className="text-[11px] text-stone-400">Tap to play clip</span>
+                <span className="text-[11px] text-stone-300 font-medium">Tap to play clip</span>
               </div>
             ) : (
-              <div className="w-full h-full bg-stone-900" />
+              /* Styled Sound Artwork Canvas instead of empty black box */
+              <div className="w-full h-full bg-gradient-to-br from-[#2c2825] via-[#24201e] to-[#1a1816] flex flex-col items-center justify-center p-4 relative overflow-hidden">
+                <div className="w-10 h-10 rounded-xl bg-stone-750/90 border border-stone-650 flex items-center justify-center mb-2 shadow-inner">
+                  <Music className="w-5 h-5 text-amber-400" />
+                </div>
+                <span className="text-xs font-semibold text-stone-200 tracking-tight max-w-[200px] truncate">
+                  {sound.title}
+                </span>
+                <span className="text-[11px] text-stone-400 mt-0.5">
+                  {sound.category || 'Sound clip'}
+                </span>
+              </div>
             )}
 
-            {/* Subtle Vignette Gradient */}
-            <div className="absolute inset-0 bg-gradient-to-t from-stone-950/80 via-transparent to-black/30" />
+            {/* Subtle Vignette Gradient - lightened so thumbnail artwork is clearly visible */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/10 opacity-70 group-hover:opacity-50 transition-opacity pointer-events-none" />
 
             {/* Tap-Friendly Center Play Button */}
             <motion.div
               whileTap={{ scale: 0.9 }}
-              className={`absolute z-10 w-12 h-12 sm:w-14 sm:h-14 rounded-full ${accent.buttonBg} flex items-center justify-center shadow-xl shadow-black/60 transition-transform`}
+              className={`absolute z-10 w-12 h-12 sm:w-14 sm:h-14 rounded-full ${accent.buttonBg} flex items-center justify-center shadow-xl shadow-black/70 transition-transform`}
             >
               <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-current translate-x-0.5" />
             </motion.div>
@@ -263,21 +266,15 @@ export const SoundCard: React.FC<SoundCardProps> = ({
       </div>
 
       {/* Sleek Label & Action Bar */}
-      <div className="p-3.5 sm:p-4 flex items-center justify-between gap-3 bg-stone-900/95">
+      <div className="p-3.5 sm:p-4 flex items-center justify-between gap-3 bg-[#1a1715]">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="font-semibold text-sm sm:text-base text-stone-100 truncate tracking-tight">
+            <h2 className="font-semibold text-sm sm:text-base text-stone-100 truncate tracking-tight group-hover:text-amber-200 transition-colors">
               {sound.title}
             </h2>
             {isTikTok && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-stone-800 text-cyan-400 border border-stone-700/50 shrink-0">
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800/60 shrink-0">
                 TikTok
-              </span>
-            )}
-            {segmentLabel && (
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 shrink-0 flex items-center gap-1">
-                <Clock className="w-2.5 h-2.5 text-amber-400" />
-                <span>{segmentLabel}</span>
               </span>
             )}
             {isPlaying && (
@@ -301,8 +298,8 @@ export const SoundCard: React.FC<SoundCardProps> = ({
             <button
               type="button"
               onClick={handleMuteToggle}
-              title={tiktokState.isMuted ? 'Unmute TikTok sound' : 'Mute TikTok sound'}
-              aria-label={tiktokState.isMuted ? 'Unmute TikTok sound' : 'Mute TikTok sound'}
+              title={tiktokState.isMuted ? 'Unmute sound' : 'Mute sound'}
+              aria-label={tiktokState.isMuted ? 'Unmute sound' : 'Mute sound'}
               className={`p-2 rounded-xl border transition-all active:scale-95 ${
                 tiktokState.isMuted
                   ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 hover:bg-amber-500/30'
@@ -323,7 +320,7 @@ export const SoundCard: React.FC<SoundCardProps> = ({
             type="button"
             onClick={handleToggle}
             aria-label={isPlaying ? `Stop ${sound.title}` : `Play ${sound.title}`}
-            className={`flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95 ${
+            className={`flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all active:scale-95 shadow-sm ${
               isPlaying
                 ? 'bg-rose-950 text-rose-200 border border-rose-800/80 shadow-sm'
                 : accent.buttonBg
